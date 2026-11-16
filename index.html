@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="id"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Malam Hujan - Three.js Cinematic</title>
+<style>
+html,body{margin:0;height:100%;background:#07080c;color:#cfd6e6;font:14px system-ui,sans-serif;overflow:hidden}
+#wrap{display:flex;flex-direction:column;align-items:center;height:100%}
+canvas{height:calc(100% - 96px);aspect-ratio:9/16;max-width:100%;margin-top:4px;background:#000}
+#ui{height:92px;width:min(100%,720px);display:flex;flex-direction:column;gap:6px;padding:4px 10px;box-sizing:border-box}
+.row{display:flex;gap:6px;align-items:center}
+button,select{background:#1b2236;color:#e6ebf7;border:1px solid #33405f;border-radius:8px;padding:7px 11px;font:inherit}
+button:hover{background:#26304b}button:disabled{opacity:.4}
+#seek,progress{flex:1}
+#st{font-size:12px;opacity:.85;min-height:16px}
+</style></head><body>
+<div id="wrap"><canvas id="c" width="540" height="960"></canvas>
+<div id="ui">
+<div class="row"><button id="bp">⏸</button><button id="br">⏮</button><input id="seek" type="range" min="0" max="1" step="0.001" value="0"><span id="tm">0.0s</span></div>
+<div class="row"><button id="bs">🔇 Suara: mati</button><select id="q"><option value="0">Preview 540×960</option><option value="1">Preview 720×1280</option><option value="2">Preview 1080×1920</option></select><button id="be">⬇ Ekspor MP4</button><progress id="pg" value="0" max="1"></progress></div>
+<div id="st">Spasi = play/pause · ←/→ = mundur/maju 1 detik</div>
+</div></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.3/build/mp4-muxer.js"></script>
+<script>
+const D=24,FPS=60,EXPOSURE=1.0;
+const $=id=>document.getElementById(id),say=s=>$('st').textContent=s;
+let _s=1337;const rnd=()=>{_s|=0;_s=_s+0x6D2B79F5|0;let t=Math.imul(_s^_s>>>15,1|_s);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296};
+const ss=(a,b,x)=>{x=Math.min(1,Math.max(0,(x-a)/(b-a)));return x*x*(3-2*x)};
+const bump=(t,a,b,r)=>ss(a,a+r,t)*(1-ss(b-r,b,t));
+const _Y=new THREE.Vector3(0,1,0);
+
+// ===== Renderer & scene =====
+const cv=$('c');
+const renderer=new THREE.WebGLRenderer({canvas:cv,preserveDrawingBuffer:true});
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x05060a);
+const camera=new THREE.PerspectiveCamera(38,9/16,.1,40);
+const Mt=(c,r=.7,m=0,e=0x000000)=>new THREE.MeshStandardMaterial({color:c,roughness:r,metalness:m,emissive:e});
+const BX=(w,h,d)=>new THREE.BoxGeometry(w,h,d),SP=r=>new THREE.SphereGeometry(r,24,16),CY=(a,b,h,s=16)=>new THREE.CylinderGeometry(a,b,h,s);
+function add(g,m,x=0,y=0,z=0,p=scene,sx=1,sy=1,sz=1){const o=new THREE.Mesh(g,m);o.position.set(x,y,z);o.scale.set(sx,sy,sz);o.castShadow=o.receiveShadow=true;p.add(o);return o}
+function glow(r,g,b){return new THREE.MeshBasicMaterial({color:new THREE.Color().setRGB(r,g,b)})}
+function cvs(w,h){const c=document.createElement('canvas');c.width=w;c.height=h;return c}
+
+// ----- Ruangan -----
+const wood=cvs(512,512),wg=wood.getContext('2d');
+for(let i=0;i<8;i++){const v=70+rnd()*30|0;wg.fillStyle=`rgb(${v+25},${v-5},${v-30})`;wg.fillRect(0,i*64,512,64);wg.fillStyle='rgba(0,0,0,.45)';wg.fillRect(0,i*64,512,3)}
+const woodT=new THREE.CanvasTexture(wood);woodT.wrapS=woodT.wrapT=THREE.RepeatWrapping;woodT.repeat.set(2,2);
+const floor=add(new THREE.PlaneGeometry(6,4.6),new THREE.MeshStandardMaterial({map:woodT,roughness:.28,metalness:.1}),0,0,-.9);floor.rotation.x=-Math.PI/2;floor.castShadow=false;
+const rug=add(new THREE.CircleGeometry(1.1,40),Mt(0x3a2a4a,.95),0,.006,.1);rug.rotation.x=-Math.PI/2;
+const wallM=Mt(0x3a3340,.9),woodM=Mt(0x6b4328,.4,.05);
+add(BX(6,2.8,.1),wallM,0,1.4,1.45);add(BX(6,2.8,.1),wallM,0,1.4,-3.25);add(BX(.1,2.8,4.6),wallM,3.05,1.4,-.9);add(BX(6,.1,4.6),wallM,0,2.85,-.9);
+add(BX(.1,.9,4.6),wallM,-3.05,.45,-.9);add(BX(.1,.6,4.6),wallM,-3.05,2.5,-.9);add(BX(.1,1.3,2.3),wallM,-3.05,1.55,-2.05);add(BX(.1,1.3,.4),wallM,-3.05,1.55,1.2);
+add(BX(.16,.05,2.0),woodM,-2.95,.92,.05);add(BX(.04,1.3,.04),woodM,-2.98,1.55,.05);add(BX(.04,.04,1.9),woodM,-2.98,1.55,.05);
+const glass=new THREE.Mesh(new THREE.PlaneGeometry(1.9,1.3),new THREE.MeshStandardMaterial({color:0x9ab4d8,roughness:.05,metalness:.2,transparent:true,opacity:.12,depthWrite:false}));
+glass.rotation.y=Math.PI/2;glass.position.set(-3,1.55,.05);scene.add(glass);
+// Kota buram di luar jendela
+const cc=cvs(1024,512),cg=cc.getContext('2d'),gr=cg.createLinearGradient(0,0,0,512);gr.addColorStop(0,'#0b1230');gr.addColorStop(1,'#1c1232');cg.fillStyle=gr;cg.fillRect(0,0,1024,512);
+const pal=['255,179,107','255,217,160','127,180,255','255,122,154','154,255,200'];
+for(let i=0;i<240;i++){const x=rnd()*1024,y=200+rnd()*312,r=4+rnd()*14,c=pal[rnd()*5|0],g=cg.createRadialGradient(x,y,0,x,y,r);g.addColorStop(0,`rgba(${c},.9)`);g.addColorStop(1,`rgba(${c},0)`);cg.fillStyle=g;cg.fillRect(x-r,y-r,2*r,2*r)}
+const cityMat=new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(cc),color:0xffffff});
+const city=new THREE.Mesh(new THREE.PlaneGeometry(26,12),cityMat);city.rotation.y=Math.PI/2;city.position.set(-9,3,0);scene.add(city);
+// Hujan di luar
+const RN=1800,rx=[],ry=[],rz=[],rv=[];for(let i=0;i<RN;i++){rx.push(-3.3-rnd()*4.5);ry.push(rnd()*5);rz.push(-4+rnd()*8);rv.push(7+rnd()*4)}
+const rainGeo=new THREE.BufferGeometry();rainGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(RN*6),3));
+const rain=new THREE.LineSegments(rainGeo,new THREE.LineBasicMaterial({color:0x9fb8ff,transparent:true,opacity:.45}));rain.frustumCulled=false;scene.add(rain);
+// Tetes di kaca
+const drops=[];const dropM=Mt(0xcfe0ff,0,.1);dropM.transparent=true;dropM.opacity=.55;
+for(let i=0;i<46;i++){const m=add(SP(1),dropM,-2.985,0,0);m.castShadow=false;drops.push({m,z:-.85+rnd()*1.8,sp:.02+rnd()*.06,off:rnd(),sz:.006+rnd()*.007})}
+// Dekorasi
+const framesC=[0xd9534f,0x4f8fd9,0xe0b84f];[-1.25,-.5,1.25].forEach((x,i)=>add(BX(.34,.46,.02),Mt(framesC[i],.6,0,0x120808),x,1.7,1.38));
+for(let i=0;i<16;i++)add(SP(.02),glow(2.4,1.7,.8),-1.4+i*.19,2.45+.05*Math.sin(i*1.3),1.37).castShadow=false;
+add(CY(.12,.09,.22),Mt(0x7a4a30,.8),-1.4,.11,1.0);for(let i=0;i<7;i++)add(SP(.12),Mt(0x2f7a45,.7),-1.4+(rnd()-.5)*.2,.35+rnd()*.3,1.0+(rnd()-.5)*.2);
+// Meja, monitor, lampu
+add(BX(1.8,.05,.8),woodM,0,.695,.7);[[-.85,.35],[.85,.35],[-.85,1.05],[.85,1.05]].forEach(p=>add(BX(.05,.67,.05),woodM,p[0],.335,p[1]));
+add(BX(.64,.4,.03),Mt(0x0c0c0e,.4),0,1.06,.9);add(CY(.02,.02,.2),Mt(0x111114,.4),0,.82,.93);add(BX(.22,.012,.14),Mt(0x111114,.4),0,.726,.92);
+const sc=cvs(512,320),scT=new THREE.CanvasTexture(sc);
+const screen=new THREE.Mesh(new THREE.PlaneGeometry(.6,.36),new THREE.MeshBasicMaterial({map:scT,color:new THREE.Color().setRGB(1.7,1.7,1.8)}));screen.rotation.y=Math.PI;screen.position.set(0,1.06,.8835);scene.add(screen);
+add(BX(.4,.02,.14),Mt(0x1a1a22,.5,.3,0x1c0e3a),0,.73,.46);
+const mouse=add(BX(.06,.025,.1),Mt(0x1a1a22,.4,.3,0x1c0e3a),.3,.735,.42);
+add(CY(.04,.035,.09),Mt(0xeeeeee,.3),-.55,.765,.7);
+add(CY(.07,.08,.02),Mt(0x222226,.5,.5),.72,.73,.95);add(CY(.008,.008,.5),Mt(0x222226,.5,.5),.72,.98,.95);
+const shade=add(CY(.04,.09,.1),glow(1.9,1.25,.6),.66,1.22,.9);shade.rotation.z=.5;shade.castShadow=false;
+// Kursi
+const chairM=Mt(0x2a2c36,.7);add(BX(.5,.06,.5),chairM,0,.42,-.08);add(BX(.5,.55,.06),chairM,0,.72,-.34);add(CY(.04,.04,.4),Mt(0x111114,.4,.6),0,.2,-.08);add(CY(.28,.28,.03,20),Mt(0x111114,.4,.6),0,.03,-.08);
+
+// ===== Karakter (chibi, mengikuti referensi) =====
+const skin=Mt(0xf0b085,.6),hairM=Mt(0x181211,.55,0,0x07070a),shirt=Mt(0x171515,.8),orange=Mt(0xff6a00,.6,0,0x331200),pants=Mt(0x151414,.85),sand=Mt(0x1c1c1e,.7),eyeM=Mt(0x2b1b15,.2),white=new THREE.MeshBasicMaterial({color:0xffffff});
+const ch=new THREE.Group();scene.add(ch);
+const torso=add(BX(.36,.34,.24),shirt,0,.72,0,ch);
+[-1,1].forEach(s=>{add(BX(.014,.3,.1),orange,s*.186,.72,.07,ch);const c=add(BX(.1,.035,.05),orange,s*.055,.895,.1,ch);c.rotation.z=s*.5});
+add(BX(.2,.04,.06),orange,0,.9,-.06,ch);add(CY(.06,.06,.08),skin,0,.9,.03,ch);
+add(BX(.36,.16,.26),pants,0,.5,.0,ch);
+[-1,1].forEach(s=>{
+ const hip=new THREE.Vector3(s*.1,.5,.02),knee=new THREE.Vector3(s*.11,.5,.32),ank=new THREE.Vector3(s*.11,.1,.36);
+ link(add(CY(1,1,1,12),pants,0,0,0,ch),hip,knee,.085);link(add(CY(1,1,1,12),pants,0,0,0,ch),knee,ank,.07);add(SP(.085),pants,knee.x,knee.y,knee.z,ch);
+ add(BX(.04,.08,.1),pants,s*.2,.5,.1,ch);
+ add(BX(.12,.035,.2),sand,s*.11,.03,.42,ch);add(SP(.06),skin,s*.11,.075,.43,ch,1,.6,1.5);add(BX(.125,.03,.07),sand,s*.11,.1,.4,ch);
+});
+function link(m,a,b,r){const d=new THREE.Vector3().subVectors(b,a),L=d.length();m.position.copy(a).addScaledVector(d,.5);m.scale.set(r,L,r);m.quaternion.setFromUnitVectors(_Y,d.divideScalar(L||1))}
+const head=new THREE.Group();head.position.set(0,1.17,.02);ch.add(head);
+add(SP(.3),skin,0,0,0,head,1.05,.95,.97);
+[-1,1].forEach(s=>add(SP(.055),skin,s*.3,-.02,0,head,.6,1,1));
+const eyes=[-1,1].map(s=>{const g=new THREE.Group();g.position.set(s*.115,-.015,.252);head.add(g);add(SP(.07),eyeM,0,0,0,g,.85,1.25,.4);add(SP(.02),white,.018,.035,.02,g);add(SP(.011),white,-.015,-.015,.021,g);
+ const b=add(BX(.1,.018,.02),hairM,s*.12,.078,.288,head);b.rotation.z=s*-.1;return g});
+add(BX(.05,.01,.01),Mt(0x7a3b2e),0,-.12,.262,head);
+add(SP(.325),hairM,0,.08,-.05,head,1.08,1.04,1.08);
+for(let n=0,t=0;n<26&&t<300;t++){const u=rnd()*1.2-.2,a=rnd()*6.283,r=Math.sqrt(1-u*u),d=new THREE.Vector3(r*Math.cos(a),u,r*Math.sin(a));if(d.z>.3&&u<.55)continue;n++;
+ const sp=add(new THREE.ConeGeometry(.08,.26,7),hairM,0,0,0,head),L=.7+rnd()*.6;sp.scale.y=L;
+ const tip=d.clone().add(new THREE.Vector3(rnd()-.5,rnd()-.5,rnd()-.5).multiplyScalar(.5)).normalize();
+ sp.quaternion.setFromUnitVectors(_Y,tip);sp.position.set(0,.08,-.05).addScaledVector(d,.3).addScaledVector(tip,.1*L)}
+[-.22,-.14,-.06,.02,.1,.18,.25].forEach(x=>{const z=.285*Math.sqrt(Math.max(.02,1-(x/.315)**2-(.14/.285)**2))+.012;const b=add(new THREE.ConeGeometry(.06,.17,6),hairM,x,.14,z,head);b.rotation.set(Math.PI-.3,0,-x*1.2)});
+[-1,1].forEach(s=>add(SP(.12),hairM,s*.27,.02,-.03,head,.7,1.2,1));
+const swirl=add(new THREE.TorusGeometry(.09,.035,10,20),hairM,0,.42,-.03,head);swirl.rotation.x=Math.PI/2;
+// Lengan (IK 2 tulang)
+function mkArm(){return{sl:add(CY(1,1,1,12),shirt,0,0,0,ch),up:add(CY(1,1,1,12),skin,0,0,0,ch),fo:add(CY(1,1,1,12),skin,0,0,0,ch),hd:add(SP(.052),skin,0,0,0,ch,1,.8,1.2),el:add(SP(.048),skin,0,0,0,ch)}}
+const arms={'-1':mkArm(),'1':mkArm()};
+function solveArm(A,s,T){const S=new THREE.Vector3(s*.2,.84,0),d=T.clone().sub(S),dist=Math.min(d.length(),.47),dir=d.normalize(),a=dist/2,h=Math.sqrt(Math.max(.0576-a*a,0));
+ const pole=new THREE.Vector3(s*.7,-1,-.4);pole.addScaledVector(dir,-pole.dot(dir)).normalize();
+ const E=S.clone().addScaledVector(dir,a).addScaledVector(pole,h),H=S.clone().addScaledVector(dir,dist),M=S.clone().lerp(E,.4);
+ link(A.sl,S,M,.068);link(A.up,M,E,.048);link(A.fo,E,H,.044);A.hd.position.copy(H);A.el.position.copy(E)}
+
+// ===== Cahaya =====
+scene.add(new THREE.HemisphereLight(0x3a4a70,0x1a1008,.55));
+const moon=new THREE.DirectionalLight(0x6f8fd8,.35);moon.position.set(-6,3,0);scene.add(moon);
+const lamp=new THREE.SpotLight(0xffb060,2.6,7,.95,.8,1.6);lamp.position.set(.66,1.18,.88);lamp.target.position.set(-.1,.8,.3);scene.add(lamp,lamp.target);
+lamp.castShadow=true;lamp.shadow.mapSize.set(1024,1024);lamp.shadow.bias=-.0004;lamp.shadow.camera.near=.3;lamp.shadow.camera.far=6;
+const fill=new THREE.PointLight(0xff9a50,.7,7);fill.position.set(.2,2.4,-.2);scene.add(fill);
+const scLight=new THREE.PointLight(0x5aa0ff,1.1,3.2);scLight.position.set(0,1.05,.7);scene.add(scLight);
+const flash=t=>[15.0,16.3].reduce((m,t0)=>Math.max(m,t>t0?Math.exp(-(t-t0)*9):0),0);
+
+// ===== Layar komputer =====
+const fr=n=>{const x=Math.sin(n*127.1)*43758.5453;return x-Math.floor(x)};
+function drawScreen(t){const g=sc.getContext('2d');g.fillStyle='#04070d';g.fillRect(0,0,512,320);g.fillStyle='#10192b';g.fillRect(0,0,512,22);
+ ['#ff5f57','#febc2e','#28c840'].forEach((c,i)=>{g.fillStyle=c;g.beginPath();g.arc(14+i*16,11,4,0,6.3);g.fill()});
+ const sp=t*1.6,k=Math.floor(sp),f=sp-k,col=['#7aa2f7','#9ece6a','#e0af68','#bb9af7','#f7768e','#7dcfff'];
+ for(let i=0;i<22;i++){const li=i+k,y=34+i*13-f*13;let x=14+(li%3)*20;for(let s=0;s<4;s++){const w=14+fr(li*7+s)*60;g.fillStyle=col[Math.floor(fr(li*3+s)*6)];g.fillRect(x,y,w,6);x+=w+6}}
+ if(Math.floor(t*2)%2==0){g.fillStyle='#fff';g.fillRect(14,300,8,12)}scT.needsUpdate=true}
+
+// ===== Pasca-proses: DoF + bloom + grading =====
+const post=new THREE.ShaderMaterial({depthTest:false,depthWrite:false,uniforms:{tC:{value:null},tD:{value:null},res:{value:new THREE.Vector2(540,960)},nearP:{value:.1},farP:{value:40},focus:{value:2.5},aper:{value:30},fade:{value:1},time:{value:0},expo:{value:EXPOSURE}},
+vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}',
+fragmentShader:`varying vec2 vUv;uniform sampler2D tC,tD;uniform vec2 res;uniform float nearP,farP,focus,aper,fade,time,expo;
+float lin(float d){float z=d*2.-1.;return 2.*nearP*farP/(farP+nearP-z*(farP-nearP));}
+float coc(vec2 uv){float z=lin(texture2D(tD,uv).x);return min(aper*abs(z-focus)/z,16.*res.y/1920.);}
+float hs(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}
+void main(){float sc=res.y/1920.;float c0=coc(vUv);vec3 acc=texture2D(tC,vUv).rgb;float ws=1.;
+ for(int i=0;i<28;i++){float fi=float(i)+.5;float r=sqrt(fi/28.);float a=fi*2.39996;vec2 o=vec2(cos(a),sin(a))*r*c0;vec2 uv=vUv+o/res;
+  float w=clamp(coc(uv)/(length(o)+.5),0.,1.);vec3 s=texture2D(tC,uv).rgb;s*=1.+max(dot(s,vec3(.33))-1.,0.)*2.;acc+=s*w;ws+=w;}
+ vec3 col=acc/ws;vec3 b=vec3(0.);
+ for(int i=0;i<16;i++){float fi=float(i);vec2 o=vec2(cos(fi*2.4),sin(fi*2.4))*(6.+fi*2.2)*sc;b+=max(texture2D(tC,vUv+o/res).rgb-.85,0.);}
+ col+=b/16.*1.1;col*=expo;
+ col=(col*(2.51*col+.03))/(col*(2.43*col+.59)+.14);
+ col=mix(col,col*vec3(.94,1.,1.1),.3);
+ col*=mix(.45,1.,smoothstep(.95,.25,length((vUv-.5)*vec2(1.,1.25))));
+ col=pow(max(col,0.),vec3(1./2.2));col+=(hs(vUv*res+time)-.5)*.03;col*=fade;gl_FragColor=vec4(col,1.);}`});
+const postScene=new THREE.Scene(),postCam=new THREE.OrthographicCamera(-1,1,1,-1,0,1);postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),post));
+let rt;function setSize(w,h){renderer.setSize(w,h,false);if(rt)rt.dispose();const hf=renderer.capabilities.isWebGL2&&renderer.extensions.has('EXT_color_buffer_float');
+ rt=new THREE.WebGLRenderTarget(w,h,{minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter,type:hf?THREE.HalfFloatType:THREE.UnsignedByteType,depthTexture:new THREE.DepthTexture(w,h,THREE.UnsignedIntType)});
+ post.uniforms.tC.value=rt.texture;post.uniforms.tD.value=rt.depthTexture;post.uniforms.res.value.set(w,h);post.uniforms.aper.value=34*h/1920}
+
+// ===== Animasi (fungsi murni dari waktu t) =====
+const FOC=new THREE.Vector3(0,1.1,.03),TGT=new THREE.Vector3(),tmpT=new THREE.Vector3();
+function update(t){
+ // kamera sinematik: orbit pelan dari belakang karakter ke profil samping
+ const u=t/D,e=u*u*(3-2*u),a=2.8-1.42*e,r=3-.8*e;
+ camera.position.set(r*Math.sin(a)+.012*Math.sin(t*.9),1.45-.3*e+.02*Math.sin(t*.7),.3+r*Math.cos(a)+.01*Math.cos(t*.8));
+ TGT.set(.1*e,.95+.05*Math.sin(t*.4),.3);camera.lookAt(TGT);
+ post.uniforms.focus.value=camera.position.distanceTo(FOC);post.uniforms.time.value=t%7.13;post.uniforms.fade.value=ss(0,1.2,t)*ss(0,1.6,D-t);
+ // karakter
+ const br=Math.sin(t*1.6);torso.scale.y=1+.012*br;head.position.y=1.17+.004*br;
+ const look=bump(t,9.5,15.5,1.6);
+ head.rotation.set(.1+.04*Math.sin(t*.8)+.05*look,.1*Math.sin(t*.5)-.6*look,.03*Math.sin(t*.37));
+ const ph=t%3.7,bl=ph<.14?1-.92*Math.sin(ph/.14*Math.PI):1;eyes.forEach(g=>g.scale.y=bl);
+ const amp=ss(.25,.6,.5+.5*Math.sin(t*.9)),mb=Math.min(1,bump(t,7,12.5,1.2)+bump(t,18,21.5,1.2));
+ const press=p=>.012*Math.max(0,Math.sin(t*19+p))*amp;
+ tmpT.set(-.09+.008*Math.sin(t*3),.775+press(0),.44+.01*Math.sin(t*7));solveArm(arms['-1'],-1,tmpT);
+ const mx=.3+.04*Math.sin(t*1.7)*mb,mz=.42+.03*Math.cos(t*1.3)*mb;mouse.position.set(mx,.735,mz);
+ const tx=.09+.008*Math.sin(t*3.3+1),ty=.775+press(2),tz=.44+.01*Math.sin(t*6+1);
+ tmpT.set(tx+(mx-tx)*mb,ty+(.765-ty)*mb,tz+(mz-tz)*mb);solveArm(arms['1'],1,tmpT);
+ // layar, cahaya, hujan
+ drawScreen(t);scLight.intensity=1.1+.15*Math.sin(t*13)+.1*Math.sin(t*5.3);
+ const fl=flash(t);moon.intensity=.35+1.6*fl;cityMat.color.setScalar(.9+1.2*fl);lamp.intensity=2.6+.1*Math.sin(t*2.1);
+ const p=rainGeo.attributes.position.array;
+ for(let i=0;i<RN;i++){const y=(((ry[i]-rv[i]*t)%5)+5)%5,k=i*6;p[k]=rx[i]+.05;p[k+1]=y+.35;p[k+2]=rz[i];p[k+3]=rx[i];p[k+4]=y;p[k+5]=rz[i]}
+ rainGeo.attributes.position.needsUpdate=true;
+ drops.forEach((d,i)=>{const q=(t*d.sp+d.off)%1,k=Math.sqrt(Math.sin(Math.PI*q)),y=2.17-1.2*q+.01*Math.sin(t*3+i);d.m.position.set(-2.985,y,d.z);d.m.scale.set(d.sz*.5*k,d.sz*1.6*k,d.sz*.5*k)});
+}
+function render(t){update(t);renderer.setRenderTarget(rt);renderer.render(scene,camera);renderer.setRenderTarget(null);renderer.render(postScene,postCam)}
+
+// ===== Audio ambience hujan (sintesis prosedural) =====
+function makeRain(sr,dur){const n=sr*dur|0,buf=new AudioBuffer({numberOfChannels:2,length:n,sampleRate:sr});
+ for(let c=0;c<2;c++){const d=buf.getChannelData(c);let l1=0,l2=0,b=0,seed=12345+c*977,tA=0,tF=2000;const R=()=>{seed=(seed*16807)%2147483647;return seed/2147483647};
+  for(let i=0;i<n;i++){const t=i/sr,w=R()*2-1;l1+=.35*(w-l1);l2+=.012*(w-l2);b=(b+.02*w)*.998;
+   const m=.8+.2*Math.sin(6.283*t*.13+c),hiss=(l1-l2)*.5;
+   if(R()<25/sr){tA=.25*R();tF=1800+R()*2500}tA*=.9985;
+   const th=t>15.6?Math.min(1,(t-15.6)/.4)*Math.exp(-(t-15.6)/2.6):0;
+   let o=(hiss*.9+l2*2.2)*m*.35+tA*Math.sin(6.283*i*tF/sr)+b*th*1.6;
+   o*=ss(0,1.2,t)*ss(0,1.5,dur-t);d[i]=Math.max(-1,Math.min(1,o))}}
+ return buf}
+const abuf=makeRain(48000,D);let actx,asrc,gain,soundOn=false;
+function audioStop(){try{asrc&&asrc.stop()}catch(e){}asrc=null}
+function audioStart(){audioStop();if(!soundOn||!playing)return;asrc=actx.createBufferSource();asrc.buffer=abuf;asrc.connect(gain);asrc.start(0,Math.min(T,D-.01))}
+
+// ===== Kontrol preview =====
+let T=0,playing=true,busy=false,last=performance.now();
+const sizes=[[540,960],[720,1280],[1080,1920]];
+function applySize(){const s=sizes[+$('q').value];setSize(s[0],s[1])}
+function setPlay(v){playing=v;$('bp').textContent=v?'⏸':'▶';audioStart()}
+function seek(t){T=Math.max(0,Math.min(D-.001,t));audioStart()}
+$('bp').onclick=()=>setPlay(!playing);$('br').onclick=()=>seek(0);
+$('seek').oninput=e=>seek(e.target.value*D);
+$('q').onchange=applySize;
+$('bs').onclick=()=>{if(!actx){actx=new AudioContext();gain=actx.createGain();gain.gain.value=.8;gain.connect(actx.destination)}actx.resume();soundOn=!soundOn;$('bs').textContent=soundOn?'🔊 Suara: hidup':'🔇 Suara: mati';audioStart()};
+addEventListener('keydown',e=>{if(busy)return;if(e.code==='Space'){e.preventDefault();setPlay(!playing)}if(e.code==='ArrowRight')seek(T+1);if(e.code==='ArrowLeft')seek(T-1)});
+function loop(now){const dt=Math.min(.1,(now-last)/1000);last=now;
+ if(!busy){if(playing){T+=dt;if(T>=D){T=0;audioStart()}}render(T);$('seek').value=T/D;$('tm').textContent=T.toFixed(1)+'s'}
+ requestAnimationFrame(loop)}
+
+// ===== Ekspor MP4 (WebCodecs + mp4-muxer, offline 60 FPS) =====
+async function exportMp4(){
+ if(!window.VideoEncoder||!window.Mp4Muxer){say('Butuh Chrome/Edge desktop terbaru + internet (untuk memuat mp4-muxer).');return}
+ const W=1080,H=1920,N=Math.round(D*FPS),vcfg=c=>({codec:c,width:W,height:H,bitrate:16e6,framerate:FPS});
+ let codec=null;for(const c of ['avc1.640033','avc1.4d0033','avc1.640028']){if((await VideoEncoder.isConfigSupported(vcfg(c))).supported){codec=c;break}}
+ if(!codec){say('Encoder H.264 1080×1920 tidak didukung browser ini.');return}
+ const acfg={codec:'mp4a.40.2',sampleRate:48000,numberOfChannels:2,bitrate:160000};
+ const aOk=!!window.AudioEncoder&&(await AudioEncoder.isConfigSupported(acfg)).supported;
+ setPlay(false);audioStop();busy=true;$('be').disabled=true;let err=null;
+ try{
+  setSize(W,H);
+  const muxer=new Mp4Muxer.Muxer({target:new Mp4Muxer.ArrayBufferTarget(),video:{codec:'avc',width:W,height:H},...(aOk?{audio:{codec:'aac',numberOfChannels:2,sampleRate:48000}}:{}),fastStart:'in-memory'});
+  const ve=new VideoEncoder({output:(c,m)=>muxer.addVideoChunk(c,m),error:e=>err=e});ve.configure(vcfg(codec));
+  if(aOk){const ae=new AudioEncoder({output:(c,m)=>muxer.addAudioChunk(c,m),error:e=>err=e});ae.configure(acfg);
+   const L=abuf.getChannelData(0),Rr=abuf.getChannelData(1),CH=4800;
+   for(let i=0;i<L.length;i+=CH){const n=Math.min(CH,L.length-i),d=new Float32Array(n*2);d.set(L.subarray(i,i+n),0);d.set(Rr.subarray(i,i+n),n);
+    ae.encode(new AudioData({format:'f32-planar',sampleRate:48000,numberOfFrames:n,numberOfChannels:2,timestamp:Math.round(i/48000*1e6),data:d}))}
+   await ae.flush()}
+  for(let f=0;f<N;f++){if(err)throw err;render(f/FPS);
+   const fr_=new VideoFrame(cv,{timestamp:Math.round(f*1e6/FPS),duration:Math.round(1e6/FPS)});ve.encode(fr_,{keyFrame:f%120===0});fr_.close();
+   while(ve.encodeQueueSize>6)await new Promise(r=>setTimeout(r,2));
+   if(f%6===0){$('pg').value=f/N;say(`Merender frame ${f}/${N}…`);await new Promise(r=>setTimeout(r,0))}}
+  await ve.flush();muxer.finalize();
+  const url=URL.createObjectURL(new Blob([muxer.target.buffer],{type:'video/mp4'})),a=document.createElement('a');a.href=url;a.download='malam-hujan-1080x1920-60fps.mp4';a.click();
+  say(aOk?'Selesai! MP4 + audio hujan terunduh.':'Selesai (tanpa audio: AAC encoder tidak tersedia).');
+ }catch(e){say('Ekspor gagal: '+(e.message||e))}
+ finally{busy=false;$('be').disabled=false;$('pg').value=0;applySize();last=performance.now();setPlay(true)}
+}
+$('be').onclick=exportMp4;
+applySize();requestAnimationFrame(loop);
+</script></body></html>
